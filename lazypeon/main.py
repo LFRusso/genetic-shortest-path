@@ -1,111 +1,167 @@
 import numpy as np
 import plotly.graph_objects as go
+import matplotlib.pyplot as plt
+import copy
 
-# Function to plot
-def f(x, y, z):
-    # Sphere
-    #f = x**2 + y**2 + z**2 - 4
-    
-    # <3
-    f = (x**2 + (9*y**2)/4 + z**2 - 1)**3 - (x**2)*z**3 - (9*(y**2)*(z**3))/80
-    
-    # Surface
-    #f = x**2 * y**2 + z
-    #f = x**2 - y**2 - z
-    
-    # Cone
-    #f = (x**2 + y**2) - (z - 5)**2
 
-    return f
+# Partícula/Elemento representada pelo conjunto de pontos que deverão ficar no melhor caminho 
+class Particle:
+    def __init__(self, size, f, A, B):
+        self.size = size    
+        self.f = f
+        self.fitness = 0
+        
+        # Iniciando partículas aleatóriamente
+        p = np.zeros((size+2, 3))
+        p[:, 0] = np.linspace(A[0], B[0], size+2)
+        p[:, 1] = np.linspace(A[1], B[1], size+2)
+        p[:, 2] = np.linspace(A[2], B[2], size+2)        
+        rand = np.random.normal(scale=.1  ,size=(size, 3))
 
-def genPoints(n, A, B, gen_size=5):
-    p = np.zeros((n+2, 3))
-    p[:, 0] = np.linspace(A[0], B[0], n+2)
-    p[:, 1] = np.linspace(A[1], B[1], n+2)
-    p[:, 2] = np.linspace(A[2], B[2], n+2)
-    
-    rand = np.random.normal(scale=.1  ,size=(gen_size, n, 3))
-    
-    P = np.array(gen_size*[p])
-    P[:, 1:-1] += rand
-    
-    return P
+        p[1:-1] += rand
+        self.state = np.array(p)
+        
+        self.pbest = self.state
+        self.velocity = np.zeros(shape=(size, 3))
+        return
 
-def crossover(P, size, probability=0.6):
-    crossed_P = np.zeros((size, P.shape[1], P.shape[2]))
-    no_genes = P.shape[1]
+    # Compute distances between points
+    def distances(self):
+        l_vec = np.zeros((self.state.shape[0]-1, 1))
+        for i in range(1, self.state.shape[0]):
+            l_vec[i-1] = np.linalg.norm(self.state[i-1] - self.state[i])
 
-    for i in range(size):
-        if (probability < np.random.random()):
-            # crossover
-            (idx1, idx2) = (np.random.choice(P.shape[0]), np.random.choice(P.shape[0]))
-            
-            
-            (p1, p2) = (P[idx1], P[idx2])
-            cross_idx = np.random.randint(2, no_genes)
-            crossed_P[i] = np.vstack((p1[:cross_idx], p2[cross_idx:]))
-        else:
-            # copy a random parent
-            idx = np.random.choice(P.shape[0])
-            crossed_P[i] = P[idx]        
+        return l_vec
     
-    return crossed_P
+    # Fitness da partícula
+    def get_fitness(self, weights=[.8, 2.2, 1.5]):
+        l_vec = self.distances()
+        L = np.sum(l_vec)
+        L_med = L / (self.state.shape[0] - 1) 
 
-def mutate(P, p=0.02):
-    mutated_P = np.copy(P)
-    for i in range(P.shape[0]):
-        if (np.random.random() < p):
+        # Total length
+        loss_1 = L
+
+        # Equal lengths
+        loss_2 = np.sum(np.square(l_vec - L_med))
+
+        # Constraint
+        loss_3 = np.sum(np.square(self.f(self.state[:, 0], self.state[:, 1], self.state[:, 2])))
+
+        loss = weights[0]*loss_1 + weights[1]*loss_2 + weights[2]*loss_3
+        fit = 1/loss
+        
+        self.fitness = fit
+        return fit
+      
+    # Dada uma taxa de mutação, realiza a mutação da partícula
+    def mutate(self, rate=0.01):
+        mutated_state = np.copy(self.state)
+        if (np.random.random() < rate):
             #mutate
             rand_scale = np.absolute(np.random.normal(loc=0.01, scale=0.025))
-            mutation = np.random.normal(scale=rand_scale, size=P[i].shape)
-            mutated_P[i, 1:-1] = P[i, 1:-1] + mutation[1:-1]
-    return mutated_P
+            mutation = np.random.normal(scale=rand_scale, size=self.state.shape)
+            mutated_state[1:-1] = self.state[1:-1] + mutation[1:-1]
+        self.state = mutated_state
+        return
+        
+    def show(self):
+        for i in range(self.size):
+            print(f"\t{self.state[i]}")
+        return
 
-def evolve(P):
-    size = P.shape[0]
-    losses = np.zeros(size)
-    for i in range(size):
-        losses[i] = loss(P[i], [.8, 2.2, 1.5])
-    #print("Loss = ", np.average(losses))
+
+# ================= Ḿodelo para obtenção do melhor caminho ===============
+class Path:
+    def __init__(self, points=5, n_particles=5, max_generations=1000, mutation_rate=0.1, crossover_p=0.6, n_best=2):
+        self.n_particles = n_particles
+        self.mutation_rate = mutation_rate
+        self.n_best = n_best
+        self.crossover_p = crossover_p
+        self.max_generations = max_generations
+        self.fitness = []
+        self.dimension = points
+        self.f = None
+        return
     
-    sorted_idxs = losses.argsort()
-    P = P[sorted_idxs]
-    print(np.average(losses), np.sort(losses)[0])
+    def crossover(self, P):
+        size = self.n_particles
+        crossed_P = np.zeros((size, P.shape[1], P.shape[2]))
+        no_genes = P.shape[1]
+
+        for i in range(size):
+            if (np.random.random() < self.crossover_p):
+                # crossover
+                (idx1, idx2) = (np.random.choice(P.shape[0]), np.random.choice(P.shape[0]))
+
+                (p1, p2) = (P[idx1], P[idx2])
+                cross_idx = np.random.randint(2, no_genes)
+                crossed_P[i] = np.vstack((p1[:cross_idx], p2[cross_idx:]))
+            else:
+                # copy a random parent
+                idx = np.random.choice(P.shape[0])
+                crossed_P[i] = P[idx]        
+
+        return crossed_P
+
     
-    new_P = P[:2]
-    new_P = crossover(new_P, size, 0.3)
-    mutated_P = mutate(new_P, .2)
-    ##
-    mutated_P[0] = P[0]
+    def fit(self, f, A, B):
+        self.f = f
+        self.A = A
+        self.B = B
+        
+        # Inicializando partículas aleatóriamente
+        particles = []
+        for i in range(self.n_particles):
+            new_particle = Particle(self.dimension, f, A, B)
+            particles.append(new_particle)
+        self.gbest = None
+        self.particles = np.array(particles)
+        
+        # Passando função para partículas
+        for i in range(self.n_particles):
+            self.particles[i].f = self.f
+        
+        # Valor inicial de melhor global (não é importante, será atualizado em seguida)
+        self.gbest = copy.deepcopy(self.particles[0])
+        
+        for t in range(self.max_generations):
+            # obtendo novo melhor global
+            for index,particle in enumerate(self.particles):
+                if (self.gbest.get_fitness() < particle.get_fitness()):
+                    self.gbest = copy.deepcopy(particle)
+            self.fitness.append(self.gbest.get_fitness())
+            
+            # Atualizando estado das partículas
+            
+            # Obtendo lista de fitness das partítulas para serem ordenadas 
+            fitness_list = np.zeros(self.n_particles)
+            for index in range(self.n_particles):
+                fitness_list[index] = self.particles[index].get_fitness()
+            # Ordenando partículas pelo fitness em ordem decrescente
+            sorted_idxs = fitness_list.argsort()
+            self.particles = self.particles[sorted_idxs[::-1]]
+            
+            # Realizando crossover entre as n melhores partículas
+            new_particles = np.array([p.state for p in copy.deepcopy(self.particles[:self.n_best])])
+            new_particles = self.crossover(new_particles)
 
-    return mutated_P
+            # Atualizando estados das partículas
+            for idx in range(self.n_particles):
+                self.particles[idx].state = new_particles[idx]
+                # Realizando mutação das partículas
+                self.particles[idx].mutate(self.mutation_rate)
 
-# Compute distances between points
-def distances(p):
-    l_vec = np.zeros((p.shape[0]-1, 1))
-    for i in range(1, p.shape[0]):
-        l_vec[i-1] = np.linalg.norm(p[i-1] - p[i])
-
-    return l_vec
-
-# Compute loss for generation
-def loss(p, weights=[1., .9, 1.1]):
-    l_vec = distances(p)
-    L = np.sum(l_vec)
-    L_med = L / (p.shape[0] - 1) 
-   
-    # Total length
-    loss_1 = L
+        return self.fitness[-1]
     
-    # Equal lengths
-    loss_2 = np.sum(np.square(l_vec - L_med))
-    
-    # Constraint
-    loss_3 = np.sum(np.square(f(p[:, 0], p[:, 1], p[:, 2])))
-    
-    loss = weights[0]*loss_1 + weights[1]*loss_2 + weights[2]*loss_3
-    return loss
+    def show(self):
+        for i in range(self.n_particles):
+            print(i)
+            self.particles[i].show()
+        return
 
+
+# Preparação da figura
 def buildFig(x, y, z):
     fig = go.Figure(data=go.Isosurface(
         x = x.flatten(),
@@ -125,38 +181,45 @@ def buildFig(x, y, z):
     
     return fig
 
-x, y, z = np.mgrid[-2:2:100j, -2:2:100j, -2:2.:100j]
+# Função de uma esfera
+def f(x, y, z):
+    # Sphere
+    f = x**2 + y**2 + z**2 - 1
+    return f
+
+# Construção do plot da isosuperfície (meshgrid + marching cubes) e seleção dos dois pontos 
+x, y, z = np.mgrid[-1:1:100j, -1:1:100j, -1:1.:100j]
 fig = buildFig(x, y, z)
-#(A, B) = np.array([[-1.9, 1.3, 1.92], [2.1, 1.2, 2.97]])
-#(A, B) = np.array([[-1, -1, 3], [0, 4, 1]])
-(A, B) = np.array([[0, 0, -1], [0.5, 0.05, 1.2]])
-P = genPoints(20, A, B)
+(A, B) = np.array([[0, 0, 1], [np.sqrt(1/2), np.sqrt(1/2), 0]])
 
-for i in range(50000):
-    P = evolve(P)
-    #print("Generation", i)
+path = Path(max_generations=1000, mutation_rate=0.2, crossover_p=0.7, points=10, n_particles=20, n_best=2)
+fit = path.fit(f, A, B)
+print(fit)
 
-#for p in P:
-#   fig.add_trace(go.Scatter3d(
-#       x = p[:,0],
-#       y = p[:,1],
-#       z = p[:,2],
-#       line=dict(
-#           color='red',
-#           width=2
-#           )
-#       ))
+# Plot da evolução do fitness
+#plt.plot(np.arange(0, len(path.fitness)), path.fitness)
+#plt.show()
+
+for p in [particle.state for particle in path.particles]:
+   fig.add_trace(go.Scatter3d(
+       x = p[:,0],
+       y = p[:,1],
+       z = p[:,2],
+       line=dict(
+           color='red',
+           width=1
+           )
+       ))
 
 
-p = P[0]
+p = path.gbest.state
 fig.add_trace(go.Scatter3d(
    x = p[:,0],
    y = p[:,1],
    z = p[:,2],
    line=dict(
-       color='red',
+       color='green',
        width=2
        )
    ))
-
 fig.show()
