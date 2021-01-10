@@ -161,7 +161,6 @@ def graph_callback(run_clicks, update_clicks, gens, points, particles, rate, fun
     State('z-coord', 'value')],
     prevent_initial_call=True)
 def update_A(n, x, y, z):
-    A = [x, y, z]
     return f"[{x}, {y}, {z}]"
 
 @app.callback(
@@ -172,7 +171,6 @@ def update_A(n, x, y, z):
     State('z-coord', 'value')],
     prevent_initial_call=True)
 def update_B(n, x, y, z):
-    B = [x, y, z]
     return f"[{x}, {y}, {z}]"
     
 @app.callback(
