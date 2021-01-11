@@ -1,7 +1,7 @@
 # Genetic Shortest Path
 
 
-**Vídeo do projeto:** (https://youtu.be/IUDgSsGRKuA)[https://youtu.be/IUDgSsGRKuA] 
+**Vídeo do projeto:** https://youtu.be/IUDgSsGRKuA 
 
 
 ## Objetivos
